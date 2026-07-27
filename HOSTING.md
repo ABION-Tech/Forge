@@ -20,11 +20,7 @@ app talks directly from their browser to whichever API endpoint they
 configure in Settings — hosting is still just "serve these files over
 HTTPS," no backend involved. A few good options, roughly easiest first:
 
-## 1. Netlify Drop (fastest, zero setup)
-1. Go to https://app.netlify.com/drop
-2. Drag the whole folder (all 6 files) onto the page
-3. You get a live `https://random-name.netlify.app` URL immediately
-4. Optional: claim a free subdomain or attach your own domain in Site settings
+## 1. 
 
 ## 2. Vercel
 1. `npm i -g vercel` (needs Node.js installed)
@@ -42,17 +38,6 @@ HTTPS," no backend involved. A few good options, roughly easiest first:
 2. Drag in the folder
 3. Live at `https://<project>.pages.dev`
 
-## 5. Any plain web server / VPS
-Since there are no build dependencies, you can also just drop the files
-in the web root of any server:
-```bash
-# nginx: copy into the site's root, e.g.
-cp index.html manifest.json sw.js icon-192.png icon-512.png apple-touch-icon.png /var/www/html/
-
-# or the quickest possible local test:
-python3 -m http.server 8080
-# then open http://localhost:8080
-```
 
 ## Installing it as an app (PWA)
 Once hosted over **HTTPS** (required — the service worker won't register
