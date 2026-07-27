@@ -1,0 +1,15 @@
+# Config for deploying forge-proxy-worker.js via the wrangler CLI.
+# Not needed if you're pasting the code straight into the Cloudflare
+# dashboard's Worker editor — in that case, bind the KV namespace via
+# the dashboard instead (Settings -> Variables and Bindings -> KV
+# Namespace Bindings -> variable name "SESSIONS").
+
+name = "forge"
+main = "forge-proxy-worker.js"
+compatibility_date = "2026-07-01"
+
+# 1. Create the namespace once:  wrangler kv namespace create SESSIONS
+# 2. Paste the "id" it prints below.
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "ab27ad63c1a0467db152507c4139ea09"
