@@ -607,13 +607,15 @@ function saveSessionsToStorage() {
 // Settings. localStorage stays authoritative on this device either way;
 // cloud sync is best-effort and fails silently if unreachable.
 let cloudSyncTimer = null;
+let isSyncing = false;
 function scheduleCloudSync() {
   if (!cfg.syncUrl || !cfg.syncKey) return;
   clearTimeout(cloudSyncTimer);
   cloudSyncTimer = setTimeout(pushSessionsToCloud, 4000);
 }
 async function pushSessionsToCloud() {
-  if (!cfg.syncUrl || !cfg.syncKey) return;
+  if (!cfg.syncUrl || !cfg.syncKey || isSyncing) return;
+  isSyncing = true;
   try {
     await fetch(cfg.syncUrl.replace(/\/$/,'') + '/sessions/' + encodeURIComponent(cfg.syncKey), {
       method: 'PUT',
@@ -622,10 +624,14 @@ async function pushSessionsToCloud() {
     });
   } catch (e) {
     console.warn('Cloud session sync failed:', e.message);
+  } finally {
+    isSyncing = false;
   }
 }
 async function pullSessionsFromCloud(showFeedback) {
   if (!cfg.syncUrl || !cfg.syncKey) { if (showFeedback) showToast('Set a Sync Worker URL and Sync Key first'); return; }
+  if (isSyncing) return;
+  isSyncing = true;
   try {
     const res = await fetch(cfg.syncUrl.replace(/\/$/,'') + '/sessions/' + encodeURIComponent(cfg.syncKey));
     if (res.status === 404) { if (showFeedback) showToast('No cloud sessions yet — Push local to cloud to create them'); return; }
@@ -642,6 +648,8 @@ async function pullSessionsFromCloud(showFeedback) {
   } catch (e) {
     console.warn('Cloud session pull failed:', e.message);
     if (showFeedback) showToast('Sync failed — ' + e.message);
+  } finally {
+    isSyncing = false;
   }
 }
 
