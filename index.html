@@ -19,6 +19,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   :root{
     --bg:#0b0e14;
@@ -333,6 +334,103 @@
     #chat-inner{padding:0 14px}
     #composer-wrap{padding:12px 14px 14px}
   }
+
+  /* ── Code block action buttons ─────────────────── */
+  .code-actions{
+    position:absolute;top:8px;right:8px;display:flex;gap:5px;opacity:0;transition:opacity .15s;
+  }
+  .msg-content pre:hover .code-actions{opacity:1}
+  .code-action-btn{
+    background:var(--surface2);border:1px solid var(--border);color:var(--muted);
+    font-size:10.5px;padding:4px 9px;border-radius:5px;cursor:pointer;
+    font-family:var(--mono);white-space:nowrap;
+  }
+  .code-action-btn:hover{color:var(--accent);border-color:var(--accent)}
+  .code-action-btn.run-btn:hover{color:#4fd6be;border-color:#4fd6be}
+  .code-action-btn.save-btn:hover{color:#f2a93b;border-color:#f2a93b}
+
+  /* ── Execution output ──────────────────────────── */
+  .exec-wrap{margin:-10px 0 10px;border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;overflow:hidden}
+  .exec-header{
+    display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--surface2);
+    border-bottom:1px solid var(--border);font-size:10.5px;
+  }
+  .exec-header .exec-label{color:var(--muted);flex:1}
+  .exec-header .exec-time{color:var(--muted);font-size:10px}
+  .exec-header .exec-save-out{
+    background:none;border:1px solid var(--border);color:var(--muted);font-size:10px;
+    padding:2px 7px;border-radius:4px;cursor:pointer;font-family:var(--mono);
+  }
+  .exec-header .exec-save-out:hover{color:var(--accent);border-color:var(--accent)}
+  .exec-output{
+    background:#050708;padding:10px 14px;font-size:12px;line-height:1.6;
+    white-space:pre-wrap;word-break:break-all;max-height:260px;overflow-y:auto;
+    color:var(--text);font-family:var(--mono);
+  }
+  .exec-output.has-error{border-left:2px solid var(--danger)}
+  .exec-output.ok{border-left:2px solid var(--accent2)}
+  .exec-running{
+    display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:11.5px;
+    color:var(--muted);font-family:var(--mono);background:#050708;
+  }
+
+  /* ── File workspace panel ──────────────────────── */
+  #files-panel{
+    border-top:1px solid var(--border);background:var(--surface);
+    max-height:200px;display:none;flex-direction:column;flex-shrink:0;
+  }
+  #files-panel.visible{display:flex}
+  #files-panel.collapsed{max-height:38px}
+  #files-panel-head{
+    display:flex;align-items:center;gap:8px;padding:0 16px;height:38px;flex-shrink:0;
+    cursor:pointer;user-select:none;border-bottom:1px solid var(--border);
+    font-size:11.5px;color:var(--muted);
+  }
+  #files-panel-head:hover{color:var(--text)}
+  #files-panel-head .fp-icon{color:var(--accent);font-size:12px}
+  #files-panel-head .fp-title{font-weight:600;color:var(--text);letter-spacing:0.3px}
+  #files-panel-head .fp-count{font-size:10.5px}
+  #files-panel-head .fp-spacer{flex:1}
+  #files-panel-head .fp-zip{
+    background:none;border:1px solid var(--border);color:var(--muted);font-size:10.5px;
+    padding:3px 9px;border-radius:5px;cursor:pointer;font-family:var(--mono);
+  }
+  #files-panel-head .fp-zip:hover{border-color:var(--accent);color:var(--accent)}
+  #files-panel-head .fp-chevron{transition:transform .2s;font-size:11px}
+  #files-panel.collapsed #files-panel-head .fp-chevron{transform:rotate(-90deg)}
+  #files-list{
+    flex:1;overflow-x:auto;overflow-y:hidden;display:flex;gap:8px;
+    padding:10px 14px;align-items:flex-start;
+  }
+  .file-card{
+    flex-shrink:0;width:148px;background:var(--surface2);border:1px solid var(--border);
+    border-radius:7px;padding:10px 11px;cursor:pointer;transition:all .15s;
+    display:flex;flex-direction:column;gap:4px;position:relative;
+  }
+  .file-card:hover{border-color:var(--accent);background:var(--accent-dim)}
+  .file-card .fc-ext{
+    font-size:18px;line-height:1;margin-bottom:2px;
+  }
+  .file-card .fc-name{
+    font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;
+  }
+  .file-card .fc-size{font-size:10px;color:var(--muted)}
+  .file-card .fc-dl{
+    margin-top:4px;background:none;border:1px solid var(--border);color:var(--muted);
+    font-size:10px;padding:3px 0;border-radius:4px;cursor:pointer;font-family:var(--mono);
+    width:100%;text-align:center;
+  }
+  .file-card .fc-dl:hover{border-color:var(--accent);color:var(--accent)}
+  .file-card .fc-del{
+    position:absolute;top:6px;right:7px;background:none;border:none;color:var(--muted);
+    font-size:13px;cursor:pointer;line-height:1;padding:0;
+  }
+  .file-card .fc-del:hover{color:var(--danger)}
+
+  @media (max-width:780px){
+    #files-panel{max-height:160px}
+  }
 </style>
 </head>
 <body>
@@ -376,6 +474,19 @@
 
     <div id="chat-scroll">
       <div id="chat-inner"></div>
+    </div>
+
+    <!-- FILE WORKSPACE PANEL -->
+    <div id="files-panel" aria-label="File workspace">
+      <div id="files-panel-head" onclick="toggleFilesPanel()">
+        <span class="fp-icon">⬡</span>
+        <span class="fp-title">WORKSPACE</span>
+        <span class="fp-count" id="fp-count">0 files</span>
+        <span class="fp-spacer"></span>
+        <button class="fp-zip" onclick="downloadAllAsZip(event)" title="Download all files as ZIP">⬇ ZIP all</button>
+        <span class="fp-chevron">▾</span>
+      </div>
+      <div id="files-list"></div>
     </div>
 
     <div id="composer-wrap">
@@ -429,7 +540,7 @@
       </div>
       <div class="field">
         <label>SYSTEM PROMPT</label>
-        <textarea id="cfg-system" rows="3">You are a precise, no-nonsense coding assistant. Give working code, explain tradeoffs briefly, and flag anything risky. Default to concise answers unless asked to go deep.</textarea>
+        <textarea id="cfg-system" rows="3">You are a precise, no-nonsense coding assistant. Give working code, explain tradeoffs briefly, and flag anything risky. Default to concise answers unless asked to go deep. When generating a complete file, start the code block with a comment like: // filename: app.js (or # filename: main.py for Python) so FORGE can auto-name it when saving.</textarea>
       </div>
       <div id="status-line"></div>
 
@@ -562,7 +673,7 @@ function extToLang(name) {
 // ── Storage ──────────────────────────────────────
 function loadCfg() {
   try { cfg = JSON.parse(localStorage.getItem('forge_cfg') || '{}'); } catch(e) { cfg = {}; }
-  cfg.system = cfg.system || 'You are a precise, no-nonsense coding assistant. Give working code, explain tradeoffs briefly, and flag anything risky. Default to concise answers unless asked to go deep.';
+  cfg.system = cfg.system || 'You are a precise, no-nonsense coding assistant. Give working code, explain tradeoffs briefly, and flag anything risky. Default to concise answers unless asked to go deep. When generating a complete file, start the code block with a comment like: // filename: app.js (or # filename: main.py for Python) so FORGE can auto-name it when saving.';
   cfg.theme = cfg.theme || 'amber';
   cfg.mode = cfg.mode || 'auto';
   cfg.fontSize = cfg.fontSize || '14';
@@ -742,6 +853,7 @@ function renderChat() {
           <div class="quick-chip" onclick="quickFill('Here\\'s an error I\\'m getting:\\n\\n')">Debug an error</div>
           <div class="quick-chip" onclick="quickFill('Write a function that ')">Write a function</div>
           <div class="quick-chip" onclick="quickFill('Review this for bugs and edge cases:\\n\\n')">Code review</div>
+          <div class="quick-chip" onclick="quickFill('Write a complete, runnable file for: ')">Create a file</div>
         </div>
       </div>`;
     return;
@@ -810,20 +922,345 @@ function renderMsg(m, i) {
 }
 function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-// Injects a copy button into every rendered code block.
+// ── Language / extension helpers ─────────────────
+const LANG_EXT = {
+  javascript:'js', js:'js', jsx:'jsx', typescript:'ts', ts:'ts', tsx:'tsx',
+  python:'py', py:'py', java:'java', c:'c', cpp:'cpp', csharp:'cs', cs:'cs',
+  go:'go', rust:'rs', ruby:'rb', php:'php', html:'html', css:'css', scss:'scss',
+  json:'json', yaml:'yml', yml:'yml', xml:'xml', sql:'sql',
+  bash:'sh', sh:'sh', shell:'sh', zsh:'sh', powershell:'ps1',
+  kotlin:'kt', dart:'dart', swift:'swift', r:'r', lua:'lua',
+  toml:'toml', ini:'ini', dockerfile:'dockerfile', markdown:'md', md:'md',
+};
+const LANG_EMOJI = {
+  js:'🟨', jsx:'🟨', ts:'🔷', tsx:'🔷', py:'🐍', java:'☕', c:'⚙', cpp:'⚙',
+  cs:'💜', go:'🐹', rs:'🦀', rb:'💎', php:'🐘', html:'🌐', css:'🎨', scss:'🎨',
+  json:'📋', sql:'🗄', sh:'🖥', yml:'📝', md:'📝', txt:'📄', dockerfile:'🐳',
+};
+const RUNNABLE = new Set(['js','javascript','jsx','py','python','bash','sh','shell','zsh','typescript','ts']);
+
+function getLang(pre) {
+  const code = pre.querySelector('code');
+  if (!code) return '';
+  const cls = Array.from(code.classList).find(c => c.startsWith('language-'));
+  return cls ? cls.replace('language-','').toLowerCase() : '';
+}
+function langToExt(lang) { return LANG_EXT[lang] || 'txt'; }
+function detectFilename(code, lang) {
+  // Look for // filename: foo.js or # filename: foo.py style hints
+  const m = code.match(/^(?:\/\/|#|--|<!--)\s*filename:\s*([^\s\n]+)/im);
+  if (m) return m[1];
+  const ext = langToExt(lang);
+  return 'snippet.' + ext;
+}
+function formatBytes(n) {
+  if (n < 1024) return n + ' B';
+  return (n / 1024).toFixed(1) + ' KB';
+}
+
+// ── File workspace ────────────────────────────────
+let workspace = []; // [{id, name, content, lang}]
+let filesPanelCollapsed = false;
+
+function addToWorkspace(name, content, lang) {
+  // If name already exists, increment suffix
+  let finalName = name;
+  const existing = workspace.map(f => f.name);
+  if (existing.includes(name)) {
+    const dot = name.lastIndexOf('.');
+    const base = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : '';
+    let n = 2;
+    while (existing.includes(base + '_' + n + ext)) n++;
+    finalName = base + '_' + n + ext;
+  }
+  const id = 'wf_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  workspace.push({ id, name: finalName, content, lang });
+  renderFilesPanel();
+  showToast('Saved to workspace: ' + finalName);
+  return finalName;
+}
+
+function removeFromWorkspace(id) {
+  workspace = workspace.filter(f => f.id !== id);
+  renderFilesPanel();
+}
+
+function renderFilesPanel() {
+  const panel = document.getElementById('files-panel');
+  const list = document.getElementById('files-list');
+  const count = document.getElementById('fp-count');
+  count.textContent = workspace.length + (workspace.length === 1 ? ' file' : ' files');
+  if (workspace.length === 0) {
+    panel.classList.remove('visible');
+    return;
+  }
+  panel.classList.add('visible');
+  list.innerHTML = workspace.map(f => {
+    const ext = f.name.split('.').pop().toLowerCase();
+    const emoji = LANG_EMOJI[ext] || LANG_EMOJI[f.lang] || '📄';
+    const size = formatBytes(new Blob([f.content]).size);
+    return `<div class="file-card" title="${escHtml(f.name)}">
+      <button class="fc-del" onclick="removeFromWorkspace('${f.id}')" title="Remove">×</button>
+      <div class="fc-ext">${emoji}</div>
+      <div class="fc-name">${escHtml(f.name)}</div>
+      <div class="fc-size">${size}</div>
+      <button class="fc-dl" onclick="downloadWorkspaceFile('${f.id}')">⬇ download</button>
+    </div>`;
+  }).join('');
+}
+
+function toggleFilesPanel() {
+  filesPanelCollapsed = !filesPanelCollapsed;
+  document.getElementById('files-panel').classList.toggle('collapsed', filesPanelCollapsed);
+}
+
+function downloadWorkspaceFile(id) {
+  const f = workspace.find(w => w.id === id);
+  if (!f) return;
+  const blob = new Blob([f.content], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = f.name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function downloadAllAsZip(ev) {
+  if (ev) ev.stopPropagation();
+  if (!workspace.length) { showToast('No files in workspace yet'); return; }
+  if (typeof JSZip === 'undefined') { showToast('JSZip not loaded — try again in a moment'); return; }
+  const zip = new JSZip();
+  workspace.forEach(f => zip.file(f.name, f.content));
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'forge-workspace.zip';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('Downloading ' + workspace.length + ' files as ZIP');
+}
+
+// ── Code execution ────────────────────────────────
+let pyodideInstance = null;
+let pyodideLoading = false;
+let pyodideQueue = [];
+
+async function ensurePyodide() {
+  if (pyodideInstance) return pyodideInstance;
+  return new Promise((resolve, reject) => {
+    pyodideQueue.push({ resolve, reject });
+    if (pyodideLoading) return;
+    pyodideLoading = true;
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js';
+    s.onload = async () => {
+      try {
+        // eslint-disable-next-line no-undef
+        pyodideInstance = await loadPyodide({ stdout: () => {}, stderr: () => {} });
+        pyodideQueue.forEach(p => p.resolve(pyodideInstance));
+        pyodideQueue = [];
+      } catch(e) {
+        pyodideQueue.forEach(p => p.reject(e));
+        pyodideQueue = [];
+      }
+    };
+    s.onerror = (e) => {
+      pyodideQueue.forEach(p => p.reject(new Error('Failed to load Pyodide')));
+      pyodideQueue = [];
+    };
+    document.head.appendChild(s);
+  });
+}
+
+async function runPython(code) {
+  const py = await ensurePyodide();
+  let output = '';
+  let hasError = false;
+
+  // Redirect stdout/stderr
+  py.setStdout({ batched: (s) => { output += s + '\n'; } });
+  py.setStderr({ batched: (s) => { output += s + '\n'; hasError = true; } });
+
+  try {
+    await py.runPythonAsync(code);
+  } catch(e) {
+    output += e.message;
+    hasError = true;
+  } finally {
+    py.setStdout(null);
+    py.setStderr(null);
+  }
+  return { output: output.trimEnd() || '(no output)', hasError };
+}
+
+function runJavaScript(code) {
+  return new Promise((resolve) => {
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'display:none;position:absolute;left:-9999px';
+    document.body.appendChild(iframe);
+    const logs = [];
+    const win = iframe.contentWindow;
+    win.console = {
+      log: (...a) => logs.push(a.map(x => typeof x === 'object' ? JSON.stringify(x, null, 2) : String(x)).join(' ')),
+      warn: (...a) => logs.push('[warn] ' + a.join(' ')),
+      error: (...a) => logs.push('[error] ' + a.join(' ')),
+      info: (...a) => logs.push(a.join(' ')),
+    };
+    let hasError = false;
+    try {
+      const fn = new win.Function(code); // eslint-disable-line no-new-func
+      const ret = fn();
+      if (ret !== undefined) logs.push('→ ' + JSON.stringify(ret, null, 2));
+    } catch(e) {
+      logs.push(e.toString());
+      hasError = true;
+    } finally {
+      document.body.removeChild(iframe);
+    }
+    resolve({ output: logs.join('\n') || '(no output)', hasError });
+  });
+}
+
+function runBash(code) {
+  // Simulates a small subset of bash in a virtual filesystem over workspace
+  const lines = code.split('\n').filter(l => l.trim() && !l.trim().startsWith('#'));
+  const out = [];
+  for (const rawLine of lines) {
+    const parts = rawLine.trim().split(/\s+/);
+    const cmd = parts[0];
+    if (cmd === 'echo') {
+      out.push(parts.slice(1).join(' ').replace(/^["']|["']$/g,''));
+    } else if (cmd === 'ls') {
+      const files = workspace.map(f => f.name);
+      out.push(files.length ? files.join('  ') : '(workspace is empty)');
+    } else if (cmd === 'cat') {
+      const target = parts[1];
+      const f = workspace.find(w => w.name === target);
+      out.push(f ? f.content : 'cat: ' + (target||'') + ': No such file');
+    } else if (cmd === 'pwd') {
+      out.push('/workspace');
+    } else if (cmd === 'wc' && parts.includes('-l') && parts[parts.length-1] !== '-l') {
+      const target = parts[parts.length-1];
+      const f = workspace.find(w => w.name === target);
+      out.push(f ? (f.content.split('\n').length + ' ' + target) : 'wc: ' + target + ': No such file');
+    } else if (cmd === 'touch') {
+      const target = parts[1];
+      if (target) {
+        if (!workspace.find(w => w.name === target)) addToWorkspace(target, '', '');
+        out.push('');
+      }
+    } else if (cmd === 'rm') {
+      const target = parts[parts.length-1];
+      const f = workspace.find(w => w.name === target);
+      if (f) { removeFromWorkspace(f.id); out.push(''); }
+      else out.push('rm: ' + target + ': No such file');
+    } else if (cmd === 'printf') {
+      out.push(parts.slice(1).join(' ').replace(/^["']|["']$/g,'').replace(/\\n/g,'\n').replace(/\\t/g,'\t'));
+    } else if (cmd === '' || cmd === undefined) {
+      // blank line
+    } else {
+      out.push('bash (sandbox): ' + cmd + ': command available; only echo, ls, cat, pwd, wc, touch, rm, printf are simulated');
+    }
+  }
+  return Promise.resolve({ output: out.join('\n') || '(no output)', hasError: false });
+}
+
+async function executeCodeBlock(pre, lang) {
+  const code = pre.querySelector('code')?.textContent || '';
+  const existingWrap = pre.nextElementSibling;
+  if (existingWrap?.classList.contains('exec-wrap')) existingWrap.remove();
+
+  // Inject running indicator
+  const wrap = document.createElement('div');
+  wrap.className = 'exec-wrap';
+  wrap.innerHTML = `<div class="exec-running"><span>▶</span> <span>Running ${lang}…</span><span class="dots"><span>·</span><span>·</span><span>·</span></span></div>`;
+  pre.after(wrap);
+
+  const t0 = Date.now();
+  let result;
+  try {
+    const normalLang = lang.replace(/^(javascript|js|jsx)$/,'js').replace(/^(python|py)$/,'py').replace(/^(bash|sh|shell|zsh)$/,'sh').replace(/^typescript$/, 'ts');
+    if (normalLang === 'py') result = await runPython(code);
+    else if (normalLang === 'js' || normalLang === 'ts') result = await runJavaScript(code);
+    else if (normalLang === 'sh') result = await runBash(code);
+    else result = { output: 'Runner not available for ' + lang, hasError: true };
+  } catch(e) {
+    result = { output: 'Execution error: ' + e.message, hasError: true };
+  }
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(2) + 's';
+
+  wrap.innerHTML = `
+    <div class="exec-header">
+      <span class="exec-label">${result.hasError ? '✗ error' : '✓ output'}</span>
+      <span class="exec-time">${elapsed}</span>
+      <button class="exec-save-out" onclick="saveOutputAsFile(this, '${escHtml(lang)}')">save output</button>
+    </div>
+    <div class="exec-output ${result.hasError ? 'has-error' : 'ok'}">${escHtml(result.output)}</div>`;
+}
+
+function saveOutputAsFile(btn, lang) {
+  const output = btn.closest('.exec-wrap').querySelector('.exec-output')?.textContent || '';
+  const ext = langToExt(lang);
+  const name = 'output_' + Date.now() + '.txt';
+  addToWorkspace(name, output, 'txt');
+}
+
+// ── Wire up code blocks (copy + save + run) ───────
+// Injects action buttons into every rendered code block.
 function wireCodeCopyButtons() {
   document.querySelectorAll('#chat-inner pre').forEach(pre => {
-    if (pre.querySelector('.code-copy')) return;
-    const btn = document.createElement('button');
-    btn.className = 'code-copy';
-    btn.textContent = 'copy';
-    btn.onclick = () => {
-      const code = pre.querySelector('code');
-      navigator.clipboard.writeText(code ? code.textContent : pre.textContent);
-      btn.textContent = 'copied';
-      setTimeout(() => btn.textContent = 'copy', 1400);
+    if (pre.querySelector('.code-actions')) return; // already wired
+    const lang = getLang(pre);
+    const code = pre.querySelector('code')?.textContent || '';
+    const canRun = RUNNABLE.has(lang);
+
+    const actions = document.createElement('div');
+    actions.className = 'code-actions';
+
+    // Copy
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'code-action-btn';
+    copyBtn.textContent = 'copy';
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(code);
+      copyBtn.textContent = 'copied!';
+      setTimeout(() => copyBtn.textContent = 'copy', 1400);
     };
-    pre.appendChild(btn);
+
+    // Save
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'code-action-btn save-btn';
+    saveBtn.textContent = 'save';
+    saveBtn.title = 'Save to file workspace';
+    saveBtn.onclick = () => {
+      const filename = detectFilename(code, lang);
+      addToWorkspace(filename, code, lang);
+      saveBtn.textContent = 'saved!';
+      setTimeout(() => saveBtn.textContent = 'save', 1600);
+    };
+
+    actions.appendChild(copyBtn);
+    actions.appendChild(saveBtn);
+
+    // Run (only for executable languages)
+    if (canRun) {
+      const runBtn = document.createElement('button');
+      runBtn.className = 'code-action-btn run-btn';
+      runBtn.textContent = '▶ run';
+      runBtn.title = 'Execute this code';
+      runBtn.onclick = async () => {
+        runBtn.textContent = '…';
+        runBtn.disabled = true;
+        await executeCodeBlock(pre, lang);
+        runBtn.textContent = '▶ run';
+        runBtn.disabled = false;
+      };
+      actions.appendChild(runBtn);
+    }
+
+    pre.style.position = 'relative'; // ensure positioning context
+    pre.appendChild(actions);
   });
 }
 
