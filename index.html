@@ -206,6 +206,7 @@
   .stream-status .dots span{animation:pulse 1.2s ease-in-out infinite}
   .stream-status .dots span:nth-child(2){animation-delay:0.15s}
   .stream-status .dots span:nth-child(3){animation-delay:0.3s}
+  .stream-status.truncated-note{color:var(--accent);padding-top:6px}
 
   .msg-attach-chip{
     font-size:10.5px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);
@@ -218,6 +219,8 @@
     font-family:var(--mono);padding:0;
   }
   .msg-action-btn:hover{color:var(--accent)}
+  .continue-btn{color:var(--accent);font-weight:600}
+  .msg:has(.continue-btn) .msg-actions{opacity:1}
 
   #composer-wrap{border-top:1px solid var(--border);background:var(--bg);padding:14px 20px 18px}
   #attach-chips{max-width:820px;margin:0 auto 8px;display:flex;flex-wrap:wrap;gap:7px}
@@ -577,6 +580,13 @@
           Auto-expand reasoning panel when a model streams thinking tokens
         </label>
       </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="cfg-auto-continue" style="width:auto" checked>
+          Auto-continue responses cut off by the token limit
+        </label>
+        <div class="field-hint">If a reply stops mid-file because it hit MAX TOKENS, FORGE automatically asks the model to resume from exactly where it left off and stitches the result into the same message — instead of you having to send a new prompt that starts a second, incomplete file.</div>
+      </div>
 
       <div class="settings-divider">SESSION SYNC (OPTIONAL)</div>
       <div class="field">
@@ -680,6 +690,7 @@ function loadCfg() {
   cfg.showReasoning = cfg.showReasoning !== false; // default true
   cfg.temperature = cfg.temperature != null ? cfg.temperature : 0.4;
   cfg.maxTokens = cfg.maxTokens || 2048;
+  cfg.autoContinue = cfg.autoContinue !== false; // default true
   cfg.syncUrl = cfg.syncUrl || '';
   cfg.syncKey = cfg.syncKey || '';
 }
@@ -708,6 +719,29 @@ function pickFontSize(val) { cfg.fontSize = val; applyTheme(); }
 function saveCfgToStorage() { localStorage.setItem('forge_cfg', JSON.stringify(cfg)); }
 function loadSessions() {
   try { sessions = JSON.parse(localStorage.getItem('forge_sessions') || '{}'); } catch(e) { sessions = {}; }
+  recoverInterruptedMessages();
+}
+// If the tab/browser closed (or crashed) while a reply was mid-stream, the
+// wrap-up in driveReply() never ran, so the message was persisted
+// with streaming:true forever. On next load, find any of those and flip
+// them into a normal "truncated" state so the person gets a Continue
+// button instead of a message that looks stuck loading forever, and so a
+// fresh prompt doesn't start a second, disconnected file.
+function recoverInterruptedMessages() {
+  let touched = false;
+  for (const id in sessions) {
+    const msgs = sessions[id].messages || [];
+    for (const m of msgs) {
+      if (m.role === 'assistant' && m.streaming) {
+        m.streaming = false;
+        m.truncated = true;
+        m.interrupted = true;
+        m.phase = 'done';
+        touched = true;
+      }
+    }
+  }
+  if (touched) saveSessionsToStorage();
 }
 function saveSessionsToStorage() {
   localStorage.setItem('forge_sessions', JSON.stringify(sessions));
@@ -886,10 +920,15 @@ function renderAssistantBody(m) {
   }
   if (phase === 'connecting') {
     out += `<div class="stream-status"><span>Connecting</span><span class="dots"><span>·</span><span>·</span><span>·</span></span></div>`;
+  } else if (phase === 'continuing') {
+    out += `<div class="msg-content">${marked.parse(m.content || '')}</div><div class="stream-status"><span>Resuming right where it left off</span><span class="dots"><span>·</span><span>·</span><span>·</span></span></div>`;
   } else if (phase === 'reasoning' && !m.content) {
     out += `<div class="stream-status"><span>Writing an answer once reasoning finishes</span><span class="dots"><span>·</span><span>·</span><span>·</span></span></div>`;
   } else {
     out += `<div class="msg-content">${marked.parse(m.content || '')}${m.streaming ? '<span class="cursor-blink"></span>' : ''}</div>`;
+  }
+  if (m.truncated && !m.streaming) {
+    out += `<div class="stream-status truncated-note"><span>⚠ ${m.interrupted ? 'Connection dropped' : 'Cut off by the token limit'} mid-response — click <b>continue</b> below to resume this exact message.</span></div>`;
   }
   return out;
 }
@@ -907,8 +946,11 @@ function renderMsg(m, i) {
   const attachChips = (m.attachNames && m.attachNames.length)
     ? '<div class="msg-attach-row">' + m.attachNames.map(n => `<span class="msg-attach-chip">📎 ${escHtml(n)}</span>`).join('') + '</div>'
     : '';
+  const continueBtn = (m.role === 'assistant' && !m.streaming && m.truncated)
+    ? `<button class="msg-action-btn continue-btn" onclick="continueAssistantReply(${i})">continue</button>`
+    : '';
   const actions = m.role === 'assistant' && !m.streaming
-    ? `<div class="msg-actions"><button class="msg-action-btn" onclick="copyMsg(${i})">copy</button><button class="msg-action-btn" onclick="retryFrom(${i})">retry</button></div>`
+    ? `<div class="msg-actions"><button class="msg-action-btn" onclick="copyMsg(${i})">copy</button><button class="msg-action-btn" onclick="retryFrom(${i})">retry</button>${continueBtn}</div>`
     : '';
   return `<div class="msg ${m.role}">
     <div class="msg-marker">${marker}</div>
@@ -1322,26 +1364,53 @@ function copyMsg(i) {
   showToast('Copied');
 }
 
-async function streamAssistantReply(session) {
-  const assistantMsg = { role: 'assistant', content: '', reasoning: '', phase: 'connecting', streaming: true };
-  session.messages.push(assistantMsg);
-  renderChat();
-  toggleSending(true);
+// ── Continuation handling ─────────────────────────
+// If a reply gets cut off (hits max_tokens, the connection drops, or the
+// tab closes mid-stream), we don't want a follow-up prompt to start a
+// second, disconnected file. Instead we keep everything on the SAME
+// message object: state (content/reasoning/truncated/continuations) is
+// persisted to localStorage as it streams, and "continuing" re-sends the
+// conversation with the partial answer replayed back as an assistant
+// turn plus a short nudge, so the model resumes mid-file instead of
+// starting over.
+const MAX_AUTO_CONTINUATIONS = 6;
+const CONTINUE_NUDGE = 'Continue exactly where you left off in your previous message above. Do not repeat anything already written, do not re-print the filename/header comment or earlier code, and do not add a closing summary — resume from the exact next character, including finishing any code block or file that was cut off.';
 
+function buildPayloadMessages(session, assistantMsg, isContinuation) {
+  const history = session.messages
+    .filter(m => m !== assistantMsg)
+    .map(m => ({ role: m.role, content: m.content }));
+  const msgs = [{ role: 'system', content: cfg.system }, ...history];
+  if (isContinuation) {
+    msgs.push({ role: 'assistant', content: assistantMsg.content });
+    msgs.push({ role: 'user', content: CONTINUE_NUDGE });
+  }
+  return msgs;
+}
+
+// Runs ONE request/stream leg against the API and folds the result into
+// assistantMsg in place. Returns how the leg ended so driveReply() can
+// decide whether to keep going.
+async function runStream(session, assistantMsg, isContinuation) {
   const payload = {
     model: cfg.model,
     stream: true,
     temperature: cfg.temperature != null ? cfg.temperature : 0.4,
     max_tokens: cfg.maxTokens || 2048,
-    messages: [
-      { role: 'system', content: cfg.system },
-      ...session.messages.filter(m => !m.streaming).map(m => ({ role: m.role, content: m.content })),
-    ],
+    messages: buildPayloadMessages(session, assistantMsg, isContinuation),
   };
 
   controller = new AbortController();
   let rawContent = '';
   let usingReasoningField = false;
+  let finishReason = null;
+  // Content/reasoning already banked from earlier legs — new deltas get
+  // appended on top of this, never replacing it, so continuations land
+  // in the same message instead of overwriting it.
+  const baseContent = assistantMsg.content;
+  const baseReasoning = assistantMsg.reasoning;
+  let lastPersist = Date.now();
+
   try {
     const res = await fetch(cfg.base.replace(/\/$/,'') + '/chat/completions', {
       method: 'POST',
@@ -1369,7 +1438,9 @@ async function streamAssistantReply(session) {
         if (data === '[DONE]') continue;
         try {
           const json = JSON.parse(data);
-          const delta = json.choices?.[0]?.delta || {};
+          const choice = json.choices?.[0] || {};
+          if (choice.finish_reason) finishReason = choice.finish_reason;
+          const delta = choice.delta || {};
           let touched = false;
           // Some reasoning models (DeepSeek-R1-style hosts) stream a
           // dedicated reasoning_content field, separate from the final
@@ -1390,29 +1461,88 @@ async function streamAssistantReply(session) {
               // the normal content stream — split those out for display.
               rawContent += delta.content;
               const split = splitThinking(rawContent);
-              assistantMsg.reasoning = split.reasoning;
-              assistantMsg.content = split.answer;
+              assistantMsg.reasoning = baseReasoning + split.reasoning;
+              assistantMsg.content = baseContent + split.answer;
               assistantMsg.phase = split.reasoning ? (split.reasoningDone ? 'answering' : 'reasoning') : 'answering';
             }
             touched = true;
           }
-          if (touched) updateStreamingMsg(assistantMsg);
+          if (touched) {
+            updateStreamingMsg(assistantMsg);
+            // Throttled persistence so a crash/closed tab mid-stream loses
+            // at most ~1s of text instead of the whole in-progress reply.
+            if (Date.now() - lastPersist > 1200) { saveSessionsToStorage(); lastPersist = Date.now(); }
+          }
         } catch(e) { /* skip malformed chunk */ }
       }
     }
+    return { finishReason, aborted: false, errored: false };
   } catch (e) {
-    if (e.name !== 'AbortError') {
-      assistantMsg.content += (assistantMsg.content ? '\n\n' : '') + '⚠ ' + e.message;
-      assistantMsg.phase = 'answering';
-    }
-  } finally {
-    assistantMsg.streaming = false;
-    assistantMsg.phase = 'done';
-    toggleSending(false);
-    saveSessionsToStorage();
-    renderChat();
-    wireCodeCopyButtons();
+    if (e.name === 'AbortError') return { finishReason, aborted: true, errored: false };
+    assistantMsg.content += (assistantMsg.content ? '\n\n' : '') + '⚠ ' + e.message;
+    assistantMsg.phase = 'answering';
+    return { finishReason, aborted: false, errored: true };
   }
+}
+
+// Orchestrates one or more legs for a single assistant message: sends the
+// first request, and — if the API reports it stopped only because it hit
+// the token limit — automatically re-sends as a continuation and appends
+// the result, up to MAX_AUTO_CONTINUATIONS times (governed by the
+// "Auto-continue" setting). Leaves a truncated flag + Continue button for
+// anything auto-continue didn't finish resolving.
+async function driveReply(session, assistantMsg, startAsContinuation) {
+  toggleSending(true);
+  let isContinuation = !!startAsContinuation;
+  let keepGoing = true;
+  while (keepGoing) {
+    keepGoing = false;
+    assistantMsg.streaming = true;
+    assistantMsg.phase = isContinuation ? 'continuing' : 'connecting';
+    assistantMsg.truncated = false;
+    renderChat();
+
+    const result = await runStream(session, assistantMsg, isContinuation);
+    assistantMsg.streaming = false;
+
+    if (result.aborted) {
+      assistantMsg.truncated = !!assistantMsg.content;
+    } else if (result.errored) {
+      assistantMsg.truncated = !!assistantMsg.content;
+    } else if (result.finishReason === 'length') {
+      assistantMsg.continuations = (assistantMsg.continuations || 0) + 1;
+      assistantMsg.truncated = true;
+      if (cfg.autoContinue && assistantMsg.continuations < MAX_AUTO_CONTINUATIONS) {
+        keepGoing = true;
+        isContinuation = true;
+      }
+    } else {
+      assistantMsg.truncated = false;
+    }
+  }
+  assistantMsg.interrupted = false;
+  assistantMsg.phase = 'done';
+  toggleSending(false);
+  saveSessionsToStorage();
+  renderChat();
+  wireCodeCopyButtons();
+}
+
+async function streamAssistantReply(session) {
+  const assistantMsg = { role: 'assistant', content: '', reasoning: '', phase: 'connecting', streaming: true, truncated: false, continuations: 0 };
+  session.messages.push(assistantMsg);
+  renderChat();
+  await driveReply(session, assistantMsg, false);
+}
+
+// Manual "continue" button — also what auto-continue calls under the
+// hood via driveReply(). Safe to call on a message left truncated by a
+// dropped connection or a closed tab, not just a token-limit cutoff.
+function continueAssistantReply(i) {
+  const session = sessions[activeId];
+  const assistantMsg = session && session.messages[i];
+  if (!session || !assistantMsg || assistantMsg.streaming) return;
+  driveReply(session, assistantMsg, true);
 }
 function updateStreamingMsg(m) {
   const inner = document.getElementById('chat-inner');
@@ -1438,6 +1568,7 @@ function openSettings() {
   document.getElementById('cfg-system').value = cfg.system || '';
   document.getElementById('cfg-fontsize').value = cfg.fontSize;
   document.getElementById('cfg-show-reasoning').checked = cfg.showReasoning;
+  document.getElementById('cfg-auto-continue').checked = cfg.autoContinue;
   document.getElementById('cfg-temp').value = cfg.temperature;
   document.getElementById('cfg-maxtokens').value = cfg.maxTokens;
   document.getElementById('cfg-sync-url').value = cfg.syncUrl || '';
@@ -1454,6 +1585,7 @@ function saveSettings() {
   cfg.system = document.getElementById('cfg-system').value.trim();
   cfg.fontSize = document.getElementById('cfg-fontsize').value;
   cfg.showReasoning = document.getElementById('cfg-show-reasoning').checked;
+  cfg.autoContinue = document.getElementById('cfg-auto-continue').checked;
   cfg.temperature = parseFloat(document.getElementById('cfg-temp').value) || 0.4;
   cfg.maxTokens = parseInt(document.getElementById('cfg-maxtokens').value) || 2048;
   const prevSyncUrl = cfg.syncUrl, prevSyncKey = cfg.syncKey;
